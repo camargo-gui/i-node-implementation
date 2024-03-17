@@ -1,13 +1,15 @@
 #pragma once
 #include "directory.h"
 
-struct indirectInode {
+struct indirectInode
+{
   int pointer[5];
 };
 
 typedef struct indirectInode IndirectInode;
 
-struct principalInode {
+struct principalInode
+{
   char permissions[10]; // 1 - d ou l, 2 - u[RWX], 3 - g[RWX], 4... - o[RWX]
   char date[10];
   char hour[10];
@@ -15,13 +17,14 @@ struct principalInode {
   char groupName[10];
   int size;
   int countLinks;
-  int pointer[8];	
+  int pointer[8];
+  char name[256];
 };
 
 typedef struct principalInode PrincipalInode;
 
-
-struct block {
+struct block
+{
   char link[50];
   Directory directory;
   IndirectInode indirectInode;

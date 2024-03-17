@@ -12,16 +12,15 @@ struct directory{
 
 typedef struct directory Directory;
 
-void insertNewEntry(Directory &directory, char name[], int index){
-	if (strlen(name) > nameLength){
-		printf("\nTamanho maior que o suportado!!!");
-	}
-	else if(directory.TL == 10){
-		printf("\nDiretorio cheio!!!");
-	}
-	else {
-		directory.index[directory.TL] = index;
-		strcpy(directory.name[directory.TL], name);
-		directory.TL++;
-	}
+Directory insertNewEntry(Directory directory, char name[], int index) {
+    if (strlen(name) > nameLength) {
+        printf("\nTamanho maior que o suportado!!!\n");
+    } else if (directory.TL == 10) {
+        printf("\nDiretorio cheio!!!\n");
+    } else {
+        directory.index[directory.TL] = index;
+        strcpy(directory.name[directory.TL], name);
+        directory.TL++;
+    }
+    return directory; 
 }
