@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 #include "i-node.h"
 #include "directory.h"
 #include "stack.h"
@@ -44,6 +46,22 @@ int findDirectory(Block disk[], char *directoryName)
   return -1;
 }
 
+int getRandomFreeBlock()
+{
+  int attempts = 0;
+  while (attempts < MAX_STACKS)
+  {
+    int stackIndex = rand() % MAX_STACKS;
+    if (stackHeads[stackIndex] > -1)
+    {
+      int blockIndex = freeBlockStacks[stackIndex][stackHeads[stackIndex]--];
+      return blockIndex;
+    }
+    attempts++;
+  }
+  return -1;
+}
+
 int findFileInDirectory(Directory directory, char *fileName)
 {
   for (int i = 0; i < directory.TL; i++)
@@ -82,6 +100,7 @@ void touch(Block disk[], char *fileName)
   // Configura o bloco como um inode de arquivo.
   disk[freeBlockIndex].type = 'I';
   strcpy(disk[freeBlockIndex].principalInode.name, fileName);
+  disk[freeBlockIndex].principalInode.permissions = 'R';
 
   // Adiciona a entrada no diretório.
   disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, fileName, freeBlockIndex);
@@ -229,22 +248,6 @@ void clearScreen()
   printf("\033[2J\033[H");
 }
 
-int getRandomFreeBlock()
-{
-  int attempts = 0;
-  while (attempts < MAX_STACKS)
-  {
-    int stackIndex = rand() % MAX_STACKS;
-    if (stackHeads[stackIndex] > -1)
-    {
-      int blockIndex = freeBlockStacks[stackIndex][stackHeads[stackIndex]--];
-      return blockIndex;
-    }
-    attempts++;
-  }
-  return -1;
-}
-
 void deleteFile(Block disk[], char *fileName)
 {
   int dirIndex = currentDirectoryIndex; // Usa o diretório atual.
@@ -317,6 +320,84 @@ void deleteDirectory(Block disk[], char *dirName)
   pushToStack(blockIndex); // Devolve o bloco para a pilha de blocos livres
 }
 
+void Bad(Block disk[], int blockIndex)
+{
+  disk[blockIndex].type = 'B';
+}
+
+void chmod(Block disk[], char *fileName, char *command) {
+    int directoryIndex = currentDirectoryIndex; // Usa o diretório atual.
+    if (directoryIndex == -1) {
+        printf("Diretório não encontrado.\n");
+        return;
+    }
+
+    // Encontra o arquivo no diretório atual
+    int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
+    if (fileIndex == -1) {
+        printf("Arquivo não encontrado.\n");
+        return;
+    }
+
+    int blockIndex = disk[directoryIndex].directory.index[fileIndex];
+    if (disk[blockIndex].type != 'I') {
+        printf("%s não é um arquivo.\n", fileName);
+        return;
+    }
+
+    // Interpretando o comando de permissão
+    char command_type;
+    char who[4];
+    char permissions[4];
+    if (sscanf(command, "%c%s%s", &command_type, who, permissions) != 3) {
+        printf("Comando de permissão inválido.\n");
+        return;
+    }
+
+    // Determina qual permissão será alterada (R, W, ou X)
+    char perm;
+    switch (permissions[0]) {
+        case 'R':
+            perm = 'r';
+            break;
+        case 'W':
+            perm = 'w';
+            break;
+        case 'X':
+            perm = 'x';
+            break;
+        default:
+            printf("Permissão inválida.\n");
+            return;
+    }
+
+    // Determina o índice inicial no array de permissões
+    int start_index;
+    switch (who[0]) {
+        case 'u':
+            start_index = 0;
+            break;
+        case 'g':
+            start_index = 3;
+            break;
+        case 'o':
+            start_index = 6;
+            break;
+        default:
+            printf("Usuário inválido.\n");
+            return;
+    }
+
+    // Atualiza as permissões do arquivo de acordo com o comando
+    for (int i = 0; i < strlen(permissions); i++) {
+        if (command_type == '+')
+            disk[blockIndex].principalInode.permissions[start_index + i] = perm;
+        else if (command_type == '-')
+            disk[blockIndex].principalInode.permissions[start_index + i] = '-';
+    }
+    printf("Permissões do arquivo %s alteradas com sucesso.\n", fileName);
+}
+
 int main()
 {
   int numBlocks;
@@ -386,6 +467,21 @@ int main()
     else if (sscanf(command, "rm %s", arg1) == 1)
     {
       deleteFile(disk, arg1);
+    }
+    else if (sscanf(command, "chmod %s %s", arg1, arg2) == 2)
+    {
+      chmod(disk, arg1, arg2);
+    }
+    else if(sscanf(command, "bad %s", arg1) == 1)
+    {
+      int blockIndex = atoi(arg1);
+      if(blockIndex < 0 || blockIndex >= numBlocks)
+      {
+        printf("Bloco inválido.\n");
+      }
+      else {
+        Bad(disk, blockIndex);
+      }
     }
     else
     {
