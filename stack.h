@@ -22,14 +22,20 @@ void initializeFreeBlockStacks()
 }
 
 // Função para adicionar um bloco livre a uma pilha específica.
-void pushToStack(int stackNumber, int freeBlockIndex)
+void pushToStack(int freeBlockIndex)
 {
-    if (stackHeads[stackNumber] < MAX_BLOCKS_PER_STACK - 1)
+    int found = 0;
+    for (int i = 0; i < MAX_STACKS; i++)
     {
-        stackHeads[stackNumber]++;
-        freeBlockStacks[stackNumber][stackHeads[stackNumber]] = freeBlockIndex;
+        if (stackHeads[i] < MAX_BLOCKS_PER_STACK - 1)
+        {
+            stackHeads[i]++;
+            freeBlockStacks[i][stackHeads[i]] = freeBlockIndex;
+            found = 1;
+            break;
+        }
     }
-    else
+    if (!found)
     {
         printf("Não há mais espaço para novas pilhas de blocos livres.\n");
     }
@@ -77,10 +83,13 @@ int popStack()
     }
 }
 
-void fillFreeBlockStacks() {
+void fillFreeBlockStacks()
+{
     int blockIndex = 1; // Começa do bloco 1, assumindo que o bloco 0 é reservado para o diretório raiz
-    for (int i = 0; i < MAX_STACKS && blockIndex < 1000; i++) {
-        for (int j = 0; j < MAX_BLOCKS_PER_STACK && blockIndex < 1000; j++) {
+    for (int i = 0; i < MAX_STACKS && blockIndex < 1000; i++)
+    {
+        for (int j = 0; j < MAX_BLOCKS_PER_STACK && blockIndex < 1000; j++)
+        {
             freeBlockStacks[i][j] = blockIndex++;
             stackHeads[i] = j; // Atualiza o topo da pilha
         }
