@@ -25,19 +25,28 @@ void initializeFreeBlockStacks()
 void pushToStack(int freeBlockIndex)
 {
     int found = 0;
-    for (int i = 0; i < MAX_STACKS; i++)
+    for (int i = 0; i <= stackOfStacksHead; i++)
     {
         if (stackHeads[i] < MAX_BLOCKS_PER_STACK - 1)
         {
-            stackHeads[i]++;
-            freeBlockStacks[i][stackHeads[i]] = freeBlockIndex;
+            freeBlockStacks[i][++stackHeads[i]] = freeBlockIndex;
             found = 1;
             break;
         }
     }
+
     if (!found)
     {
-        printf("Não há mais espaço para novas pilhas de blocos livres.\n");
+        if (stackOfStacksHead < MAX_STACKS - 1)
+        {
+            stackOfStacksHead++;
+            stackHeads[stackOfStacksHead] = 0;
+            freeBlockStacks[stackOfStacksHead][0] = freeBlockIndex;
+        }
+        else
+        {
+            printf("Não há mais espaço para novas pilhas de blocos livres.\n");
+        }
     }
 }
 

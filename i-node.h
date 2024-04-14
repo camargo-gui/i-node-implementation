@@ -19,6 +19,7 @@ struct principalInode
   int countLinks;
   int pointer[8];
   char name[256];
+  int indirect;
 };
 
 typedef struct principalInode PrincipalInode;
@@ -29,7 +30,7 @@ struct block
   Directory directory;
   IndirectInode indirectInode;
   PrincipalInode principalInode;
-  char type; // F - Free, B - Bad, I = Inode, D - Data, DIR - Directory
+  char type[4];  // F - Free, B - Bad, I = Inode, D - Data, DIR - Directory
 };
 
 typedef struct block Block;
