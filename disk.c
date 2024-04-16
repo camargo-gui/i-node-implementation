@@ -839,7 +839,7 @@ int main()
     }
     else if (strcmp(command, "help") == 0)
     {
-      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission> clear\n");
+      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission>, link -h <file> <linkname>, link -s <file> <linkname>, unlink -h <linkname>, unlink -h <linkname> clear\n");
     }
     else
     {
