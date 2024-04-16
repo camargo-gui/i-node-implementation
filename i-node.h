@@ -19,13 +19,13 @@ struct principalInode
   int pointer[8];
   char name[256];
   int indirect;
+  char symlinkPath[1024];
 };
 
 typedef struct principalInode PrincipalInode;
 
 struct block
 {
-  char link[50];
   Directory directory;
   IndirectInode indirectInode;
   PrincipalInode principalInode;

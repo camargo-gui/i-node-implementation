@@ -193,12 +193,27 @@ void ls_l(Block disk[])
   for (int i = 0; i < disk[directoryIndex].directory.TL; i++)
   {
     int inodeIndex = disk[directoryIndex].directory.index[i];
-    if (strcmp(disk[inodeIndex].type, "I") == 0)
+    PrincipalInode inode = disk[inodeIndex].principalInode;
+
+    // Pula as entradas "." e ".."
+    if (strcmp(disk[directoryIndex].directory.name[i], ".") == 0 ||
+        strcmp(disk[directoryIndex].directory.name[i], "..") == 0)
     {
-      PrincipalInode inode = disk[inodeIndex].principalInode;
-      printf("%s -> %d | links | user: %s | group: %s | size: %db | criado em: %02d/%02d | permissoes: %s\n",
-             inode.name, inode.countLinks, inode.userName, inode.groupName,
-             inode.size, inode.date->tm_mday, inode.date->tm_mon, inode.permissions);
+      continue; // Ignora a impressão de "." e ".."
+    }
+
+    char typePrefix = (inode.permissions[0] == 'd') ? 'd' : '-';
+
+    if (inode.date != NULL)
+    {
+      printf("%c%s -> %d | links | user: %s | group: %s | size: %db | criado em: %02d/%02d | permissoes: %s\n",
+             typePrefix, disk[directoryIndex].directory.name[i], inode.countLinks, inode.userName, inode.groupName,
+             inode.size, inode.date->tm_mday, inode.date->tm_mon + 1, inode.permissions);
+    }
+    else
+    {
+      printf("%c%s -> %d | links | user: %s | group: %s | size: %db | permissoes: %s\n",
+             typePrefix, disk[directoryIndex].directory.name[i], inode.countLinks, inode.userName, inode.groupName, inode.size, inode.permissions);
     }
   }
 }
@@ -352,22 +367,15 @@ void clearScreen()
 
 void deleteFile(Block disk[], char *fileName)
 {
-  int dirIndex = currentDirectoryIndex; // Usa o diretório atual.
-  int naoEncontrado = 0;
+  int dirIndex = currentDirectoryIndex;
   if (dirIndex == -1)
   {
-    naoEncontrado = 1;
+    printf("Diretório não encontrado.\n");
     return;
   }
 
   int fileIndex = findFileInDirectory(disk[dirIndex].directory, fileName);
   if (fileIndex == -1)
-  {
-    naoEncontrado = 1;
-    return;
-  }
-
-  if (naoEncontrado)
   {
     printf("rm %s: No such file or directory\n", fileName);
     return;
@@ -380,51 +388,39 @@ void deleteFile(Block disk[], char *fileName)
     return;
   }
 
-  // Obtém o inode do arquivo
-  PrincipalInode *inode = &disk[inodeIndex].principalInode;
-
-  if (inode->permissions[0] != 'r')
+  // Decrementa o contador de links
+  if (--disk[inodeIndex].principalInode.countLinks == 0)
   {
-    printf("Permissão negada.\n");
-    return;
-  }
-
-  // Libera blocos diretos
-  for (int i = 0; i < MAX_DIRECT_POINTERS && inode->pointer[i] != -1; i++)
-  {
-    disk[inode->pointer[i]].type[0] = 'F';  // Marca o bloco como livre
-    disk[inode->pointer[i]].type[1] = '\0'; // Garante que o tipo é uma string vazia após 'F'
-    pushToStack(inode->pointer[i]);         // Devolve o bloco para a pilha de blocos livres
-  }
-
-  // Libera blocos indiretos, se houver
-  if (inode->indirect != -1)
-  {
-    IndirectInode *indirect = &disk[inode->indirect].indirectInode;
-    for (int i = 0; i < MAX_INDIRECT_POINTERS && indirect->pointer[i] != -1; i++)
+    // Libera blocos diretos se não houver mais links
+    for (int i = 0; i < MAX_DIRECT_POINTERS && disk[inodeIndex].principalInode.pointer[i] != -1; i++)
     {
-      disk[indirect->pointer[i]].type[0] = 'F';
-      disk[indirect->pointer[i]].type[1] = '\0';
-      pushToStack(indirect->pointer[i]);
+      disk[disk[inodeIndex].principalInode.pointer[i]].type[0] = 'F'; // Marca o bloco como livre
+      disk[disk[inodeIndex].principalInode.pointer[i]].type[1] = '\0';
+      pushToStack(disk[inodeIndex].principalInode.pointer[i]);
     }
-    disk[inode->indirect].type[0] = 'F';
-    disk[inode->indirect].type[1] = '\0';
-    pushToStack(inode->indirect);
+
+    // Libera blocos indiretos, se houver
+    if (disk[inodeIndex].principalInode.indirect != -1)
+    {
+      IndirectInode *indirect = &disk[disk[inodeIndex].principalInode.indirect].indirectInode;
+      for (int i = 0; i < MAX_INDIRECT_POINTERS && indirect->pointer[i] != -1; i++)
+      {
+        disk[indirect->pointer[i]].type[0] = 'F';
+        disk[indirect->pointer[i]].type[1] = '\0';
+        pushToStack(indirect->pointer[i]);
+      }
+      disk[disk[inodeIndex].principalInode.indirect].type[0] = 'F';
+      disk[disk[inodeIndex].principalInode.indirect].type[1] = '\0';
+      pushToStack(disk[inodeIndex].principalInode.indirect);
+    }
+
+    // Limpa o inode principal completamente se não houver mais links
+    clearInode(disk, inodeIndex);
   }
 
-  // Limpa o inode principal
-  disk[inodeIndex].type[0] = 'F';
-  disk[inodeIndex].type[1] = '\0';
-  memset(inode, 0, sizeof(PrincipalInode));
-  pushToStack(inodeIndex);
-
-  // Remove o arquivo do diretório
-  for (int i = fileIndex; i < disk[dirIndex].directory.TL - 1; i++)
-  {
-    disk[dirIndex].directory.index[i] = disk[dirIndex].directory.index[i + 1];
-    strcpy(disk[dirIndex].directory.name[i], disk[dirIndex].directory.name[i + 1]);
-  }
-  disk[dirIndex].directory.TL--;
+  // Remove a entrada do diretório sempre
+  removeEntryFromDirectory(disk, dirIndex, fileIndex);
+  printf("Arquivo '%s' removido com sucesso.\n", fileName);
 }
 
 void deleteDirectory(Block disk[], char *dirName)
@@ -504,7 +500,7 @@ void chmod(Block disk[], char *fileName, char *command)
   int perm_base = (who == 'u' ? 0 : who == 'g' ? 3
                                                : 6);
 
-  for (int i = 0; i < (int) strlen(permissions); i++)
+  for (int i = 0; i < (int)strlen(permissions); i++)
   {
     int perm_index = perm_base + (permissions[i] == 'r' ? 0 : permissions[i] == 'w' ? 1
                                                                                     : 2);
@@ -615,6 +611,125 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
   disk[inodeIndex].principalInode = inode; // Update inode back to disk array after modifications
 }
 
+void linkFile(Block disk[], char *sourceFileName, char *destFileName, char type)
+{
+  int directoryIndex = currentDirectoryIndex;
+  int sourceFileIndex = findFileInDirectory(disk[directoryIndex].directory, sourceFileName);
+  if (sourceFileIndex == -1)
+  {
+    printf("Arquivo fonte não encontrado.\n");
+    return;
+  }
+
+  int sourceInodeIndex = disk[directoryIndex].directory.index[sourceFileIndex];
+  if (type == 'h')
+  {
+    // Link físico
+    if (disk[sourceInodeIndex].principalInode.countLinks >= 255)
+    {
+      printf("Número máximo de links alcançado.\n");
+      return;
+    }
+    disk[sourceInodeIndex].principalInode.countLinks++;
+    disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, destFileName, sourceInodeIndex);
+  }
+  else if (type == 's')
+  {
+    // Link simbólico
+    int symlinkInodeIndex = getRandomFreeBlock();
+    if (symlinkInodeIndex == -1)
+    {
+      printf("Não há espaço para um novo inode.\n");
+      return;
+    }
+    strcpy(disk[symlinkInodeIndex].type, "L"); // 'L' para link simbólico
+    strcpy(disk[symlinkInodeIndex].principalInode.name, destFileName);
+    strcpy(disk[symlinkInodeIndex].principalInode.symlinkPath, sourceFileName);
+    disk[symlinkInodeIndex].principalInode.size = strlen(sourceFileName);
+    strcpy(disk[symlinkInodeIndex].principalInode.permissions, "lrwxrwxrwx");
+    strcpy(disk[symlinkInodeIndex].principalInode.userName, "user");
+    strcpy(disk[symlinkInodeIndex].principalInode.groupName, "group");
+    time_t now = time(0);
+    disk[symlinkInodeIndex].principalInode.date = localtime(&now);
+    disk[symlinkInodeIndex].principalInode.countLinks = 1;
+
+    disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, destFileName, symlinkInodeIndex);
+  }
+}
+
+void unlinkFile(Block disk[], char *fileName, char type)
+{
+  int directoryIndex = currentDirectoryIndex;
+  if (directoryIndex == -1)
+  {
+    printf("Diretório não encontrado.\n");
+    return;
+  }
+
+  int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
+  if (fileIndex == -1)
+  {
+    printf("Arquivo '%s' não encontrado.\n", fileName);
+    return;
+  }
+
+  int inodeIndex = disk[directoryIndex].directory.index[fileIndex];
+  if (type == 'h')
+  { // Remover link físico
+    if (--disk[inodeIndex].principalInode.countLinks == 0)
+    {
+      // Remove o inode completamente se não há mais links
+      clearInode(disk, inodeIndex);
+    }
+  }
+  else if (type == 's')
+  {                               // Remover link simbólico
+    clearInode(disk, inodeIndex); // Limpa o inode do link simbólico
+  }
+
+  // Remove a entrada do diretório
+  removeEntryFromDirectory(disk, directoryIndex, fileIndex);
+  printf("Link '%s' removido com sucesso.\n", fileName);
+}
+
+void removeEntryFromDirectory(Block disk[], int directoryIndex, int entryIndex)
+{
+  if (entryIndex < 0 || entryIndex >= disk[directoryIndex].directory.TL)
+  {
+    printf("Índice de entrada inválido.\n");
+    return;
+  }
+
+  // Mover todas as entradas após o índice para uma posição anterior para preencher o espaço
+  for (int i = entryIndex; i < disk[directoryIndex].directory.TL - 1; i++)
+  {
+    strcpy(disk[directoryIndex].directory.name[i], disk[directoryIndex].directory.name[i + 1]);
+    disk[directoryIndex].directory.index[i] = disk[directoryIndex].directory.index[i + 1];
+  }
+
+  // Decrementar o total de entradas no diretório
+  disk[directoryIndex].directory.TL--;
+}
+
+void clearInode(Block disk[], int inodeIndex)
+{
+  disk[inodeIndex].principalInode.countLinks = 0;
+  disk[inodeIndex].principalInode.size = 0;
+  disk[inodeIndex].principalInode.indirect = -1;
+  disk[inodeIndex].principalInode.date = NULL;
+
+  for (int i = 0; i < MAX_DIRECT_POINTERS; i++)
+  {
+    disk[inodeIndex].principalInode.pointer[i] = -1;
+  }
+
+  strcpy(disk[inodeIndex].principalInode.permissions, "---------");
+  strcpy(disk[inodeIndex].principalInode.userName, "");
+  strcpy(disk[inodeIndex].principalInode.groupName, "");
+  strcpy(disk[inodeIndex].principalInode.name, "");
+  disk[inodeIndex].principalInode.symlinkPath[0] = '\0';
+}
+
 int main()
 {
   int blockSize;
@@ -705,6 +820,22 @@ int main()
     else if (strcmp(command, "df") == 0)
     {
       df(disk, blockSize);
+    }
+    else if (sscanf(command, "link -h %s %s", arg1, arg2) == 2)
+    {
+      linkFile(disk, arg1, arg2, 'h');
+    }
+    else if (sscanf(command, "link -s %s %s", arg1, arg2) == 2)
+    {
+      linkFile(disk, arg1, arg2, 's');
+    }
+    else if (sscanf(command, "unlink -h %s", arg1) == 1)
+    {
+      unlinkFile(disk, arg1, 'h');
+    }
+    else if (sscanf(command, "unlink -s %s", arg1) == 1)
+    {
+      unlinkFile(disk, arg1, 's');
     }
     else if (strcmp(command, "help") == 0)
     {
