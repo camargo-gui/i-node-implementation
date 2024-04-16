@@ -662,10 +662,6 @@ int main()
     {
       touch(disk, arg1, fileSizeInBytes, blockSize);
     }
-    else if (strcmp(command, "help") == 0)
-    {
-      printf("Comandos disponíveis: exit, ls, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, clear\n");
-    }
     else if (sscanf(command, "mkdir %s", arg1) == 1)
     {
       mkdir(disk, currentDirectoryIndex, arg1, blockSize);
@@ -710,7 +706,10 @@ int main()
     {
       df(disk, blockSize);
     }
-
+    else if (strcmp(command, "help") == 0)
+    {
+      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission> clear\n");
+    }
     else
     {
       printf("%s: command not found\n", command);
