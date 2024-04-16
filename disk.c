@@ -59,6 +59,33 @@ void printBlockStatus(Block disk[])
   printf("Blocos de diretório: %d\n", dirBlocks);
 }
 
+void df(Block disk[], int blockSize)
+{
+  int freeBlocks = 0, inodeBlocks = 0, dataBlocks = 0, dirBlocks = 0;
+
+  // Conta o número de cada tipo de bloco
+  for (int i = 0; i < NUM_BLOCOS; i++)
+  {
+    if (strcmp(disk[i].type, "F") == 0)
+      freeBlocks++;
+    else if (strcmp(disk[i].type, "I") == 0)
+      inodeBlocks++;
+    else if (strcmp(disk[i].type, "D") == 0)
+      dataBlocks++;
+    else if (strcmp(disk[i].type, "DIR") == 0)
+      dirBlocks++;
+  }
+
+  int totalBlocks = inodeBlocks + dataBlocks + dirBlocks;
+  int freeBytes = freeBlocks * blockSize;
+  int usedBytes = totalBlocks * blockSize;
+
+  // Exibe um relatório detalhado do uso do espaço no disco em bytes
+  printf("\nUso do Disco em Bytes:\n");
+  printf("Espaço livre: %d bytes\n", freeBytes);
+  printf("Espaço ocupado: %d bytes\n", usedBytes);
+}
+
 void initializeIndirectInode(Block disk[], int blockIndex)
 {
   if (blockIndex != -1)
@@ -353,7 +380,7 @@ void cd(Block disk[], char *dirName)
 
 void clearScreen()
 {
-  
+
   printf("\033[2J\033[H");
 }
 
@@ -588,11 +615,10 @@ int main()
     else if (sscanf(command, "touch %s %d", arg1, &fileSizeInBytes) == 2)
     {
       touch(disk, arg1, fileSizeInBytes, blockSize);
-      printBlockStatus(disk);
     }
     else if (strcmp(command, "help") == 0)
     {
-      printf("Comandos disponíveis: exit, ls, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, clear\n");
+      printf("Comandos disponíveis: exit, ls, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, clear\n");
     }
     else if (sscanf(command, "mkdir %s", arg1) == 1)
     {
@@ -617,7 +643,6 @@ int main()
     else if (sscanf(command, "rm %s", arg1) == 1)
     {
       deleteFile(disk, arg1);
-      printBlockStatus(disk);
     }
     else if (sscanf(command, "chmod %s %s", arg1, arg2) == 2)
     {
@@ -635,6 +660,11 @@ int main()
         Bad(disk, blockIndex);
       }
     }
+    else if (strcmp(command, "df") == 0)
+    {
+      df(disk, blockSize);
+    }
+
     else
     {
       printf("Comando não reconhecido.\n");
