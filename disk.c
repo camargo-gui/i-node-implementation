@@ -164,9 +164,15 @@ void ls(Block disk[])
     return;
   }
 
+  // Itera sobre todas as entradas no diretório
   for (int i = 0; i < disk[directoryIndex].directory.TL; i++)
   {
-    printf("%s\n", disk[directoryIndex].directory.name[i]);
+    // Pula as entradas "." e ".."
+    if (strcmp(disk[directoryIndex].directory.name[i], ".") != 0 &&
+        strcmp(disk[directoryIndex].directory.name[i], "..") != 0)
+    {
+      printf("%s\n", disk[directoryIndex].directory.name[i]);
+    }
   }
 }
 
@@ -181,21 +187,18 @@ void ls_l(Block disk[])
 
   for (int i = 0; i < disk[directoryIndex].directory.TL; i++)
   {
-    int fileIndex = disk[directoryIndex].directory.index[i];
-    if (strcmp(disk[fileIndex].type, "I") == 0)
+    int inodeIndex = disk[directoryIndex].directory.index[i];
+    if (strcmp(disk[inodeIndex].type, "I") == 0)
     {
-      PrincipalInode *inode = &disk[fileIndex].principalInode;
-      printf("%s -> %s | %d links | user:  %s | group: %s | size: %db | tipo: %s | criado em: %02d/%02d", inode->name, inode->permissions, inode->countLinks, inode->userName, inode->groupName, inode->size, disk[fileIndex].type, inode->date -> tm_mday, inode->date -> tm_mon);
-    }
-    else if (strcmp(disk[fileIndex].type, "DIR") == 0)
-    {
-      printf("%s -> drwxr-xr-x 2 user group 0 %s\n", disk[directoryIndex].directory.name[i], disk[fileIndex].type); //Deveria ser um inode para guardar as infos
+      PrincipalInode inode = disk[inodeIndex].principalInode;
+      printf("%s -> %d | links | user: %s | group: %s | size: %db | criado em: %02d/%02d | permissoes: %s\n",
+             inode.name, inode.countLinks, inode.userName, inode.groupName,
+             inode.size, inode.date->tm_mday, inode.date->tm_mon, inode.permissions);
     }
   }
 }
 
-
-void mkdir(Block disk[], int parentDirIndex, char *dirName)
+void mkdir(Block disk[], int parentDirIndex, char *dirName, int blockSize)
 {
   if (parentDirIndex == -1)
   {
@@ -203,30 +206,51 @@ void mkdir(Block disk[], int parentDirIndex, char *dirName)
     return;
   }
 
-  // Correção: Verificar se o diretório já existe no diretório pai
   if (findFileInDirectory(disk[parentDirIndex].directory, dirName) != -1)
   {
     printf("Diretório já existe.\n");
     return;
   }
 
-  int freeBlockIndex = getRandomFreeBlock();
-  if (freeBlockIndex == -1)
+  int dirInodeIndex = getRandomFreeBlock(); // Inode do novo diretório
+  if (dirInodeIndex == -1)
   {
-    printf("Não há espaço disponível.\n");
+    printf("Não há espaço disponível para o inode do diretório.\n");
     return;
   }
 
-  // Configura o bloco como um diretório
-  strcpy(disk[freeBlockIndex].type, "DIR");
-  disk[freeBlockIndex].directory = insertNewEntry(disk[freeBlockIndex].directory, ".", freeBlockIndex);  // link para si mesmo
-  disk[freeBlockIndex].directory = insertNewEntry(disk[freeBlockIndex].directory, "..", parentDirIndex); // link para o diretório pai
+  // Configura o inode do diretório
+  strcpy(disk[dirInodeIndex].type, "I");
+  PrincipalInode *dirInode = &disk[dirInodeIndex].principalInode;
+  strcpy(dirInode->name, dirName);
+  dirInode->size = blockSize;
+  dirInode->countLinks = 1;
+  strcpy(dirInode->permissions, "drwxr-xr-x");
+  strcpy(dirInode->userName, "user");
+  strcpy(dirInode->groupName, "group");
+  dirInode->indirect = -1; // Não há blocos indiretos inicialmente
 
-  // Adiciona o novo diretório ao diretório pai
-  disk[parentDirIndex].directory = insertNewEntry(disk[parentDirIndex].directory, dirName, freeBlockIndex);
+  time_t now = time(NULL);          // Pega a hora e data atual
+  dirInode->date = localtime(&now); // Armazena a data e hora no inode
+
+  int dirBlockIndex = getRandomFreeBlock(); // Bloco para as entradas de diretório
+  if (dirBlockIndex == -1)
+  {
+    printf("Não há espaço disponível para o bloco de diretório.\n");
+    return;
+  }
+
+  // Configura o bloco de diretório
+  strcpy(disk[dirBlockIndex].type, "DIR");
+  disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, ".", dirInodeIndex);  
+  disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, "..", parentDirIndex);
+  disk[parentDirIndex].directory = insertNewEntry(disk[parentDirIndex].directory, dirName, dirInodeIndex);
+  dirInode->pointer[0] = dirBlockIndex; // O primeiro bloco de diretório é apontado pelo inode
+
+  printf("Diretório '%s' criado com sucesso.\n", dirName);
 }
 
-void mkdirFromPath(Block disk[], char *path, char *dirName)
+void mkdirFromPath(Block disk[], char *path, char *dirName, int blockSize)
 {
   char buffer[1024];
   strcpy(buffer, path); // Copia o caminho para um buffer manipulável
@@ -264,20 +288,22 @@ void mkdirFromPath(Block disk[], char *path, char *dirName)
     }
   }
 
-  mkdir(disk, dirIndex, dirName);
+  mkdir(disk, dirIndex, dirName, blockSize);
 }
 
 void cd(Block disk[], char *dirName)
 {
   if (strcmp(dirName, ".") == 0)
   {
-    // Não faz nada, permanece no diretório atual.
+    return;
   }
   else if (strcmp(dirName, "..") == 0)
   {
-    // Volta ao diretório pai.
+    // Muda para o diretório pai.
+    currentDirectoryIndex = disk[currentDirectoryIndex].directory.index[1]; // Índice de '..'
     if (strcmp(currentPath, "/") != 0)
-    { // Verifica se não está na raiz.
+    {
+      // Encontra o último '/' e termina a string ali para remover o último diretório do caminho.
       char *lastSlash = strrchr(currentPath, '/');
       if (lastSlash != NULL)
       {
@@ -287,33 +313,31 @@ void cd(Block disk[], char *dirName)
           strcpy(currentPath, "/"); // Se vazio, volta para a raiz.
         }
       }
-      // Atualiza o currentDirectoryIndex para o diretório pai.
-      currentDirectoryIndex = disk[currentDirectoryIndex].directory.index[1];
     }
+    return;
+  }
+
+  int dirIndex = findFileInDirectory(disk[currentDirectoryIndex].directory, dirName);
+  if (dirIndex == -1)
+  {
+    printf("Diretório não encontrado.\n");
+    return;
+  }
+
+  int inodeIndex = disk[currentDirectoryIndex].directory.index[dirIndex];
+  if (strcmp(disk[inodeIndex].type, "I") == 0 && disk[inodeIndex].principalInode.pointer[0] != -1)
+  {
+    currentDirectoryIndex = disk[inodeIndex].principalInode.pointer[0];
+    // Atualiza o caminho atual ao entrar no novo diretório
+    if (strcmp(currentPath, "/") != 0)
+    {
+      strcat(currentPath, "/"); // Adiciona o separador de diretório
+    }
+    strcat(currentPath, dirName); // Adiciona o nome do novo diretório ao caminho
   }
   else
   {
-    // Muda para um novo diretório.
-    int dirIndex = findFileInDirectory(disk[currentDirectoryIndex].directory, dirName);
-    if (dirIndex == -1)
-    {
-      printf("Diretório não encontrado.\n");
-      return;
-    }
-    int newDirIndex = disk[currentDirectoryIndex].directory.index[dirIndex];
-    if (strcmp(disk[newDirIndex].type, "DIR") == 0)
-    {
-      // Atualiza o caminho.
-      if (strcmp(currentPath, "/") != 0)
-        strcat(currentPath, "/");
-      strcat(currentPath, dirName);
-      // Atualiza o currentDirectoryIndex.
-      currentDirectoryIndex = newDirIndex;
-    }
-    else
-    {
-      printf("%s não é um diretório.\n", dirName);
-    }
+    printf("%s não é um diretório.\n", dirName);
   }
 }
 
@@ -349,7 +373,8 @@ void deleteFile(Block disk[], char *fileName)
   // Obtém o inode do arquivo
   PrincipalInode *inode = &disk[inodeIndex].principalInode;
 
-  if(inode->permissions[0] != 'r'){
+  if (inode->permissions[0] != 'r')
+  {
     printf("Permissão negada.\n");
     return;
   }
@@ -403,32 +428,29 @@ void deleteDirectory(Block disk[], char *dirName)
     return;
   }
 
-  int blockIndex = disk[dirIndex].directory.index[directoryIndex];
-  if (strcmp(disk[blockIndex].type, "DIR") != 0)
+  int inodeIndex = disk[dirIndex].directory.index[directoryIndex];
+  if (strcmp(disk[inodeIndex].type, "I") != 0 || disk[disk[inodeIndex].principalInode.pointer[0]].directory.TL > 2)
   {
-    printf("O item especificado não é um diretório.\n");
+    printf("O diretório não está vazio ou o item especificado não é um diretório.\n");
     return;
   }
 
-  if (disk[blockIndex].directory.TL > 2)
-  { // Conta apenas . e ..
-    printf("O diretório não está vazio.\n");
-    return;
-  }
+  // Remove o bloco de diretório
+  int dirBlockIndex = disk[inodeIndex].principalInode.pointer[0];
+  strcpy(disk[dirBlockIndex].type, "F");
+  memset(&disk[dirBlockIndex].directory, 0, sizeof(Directory));
 
-  // Marca o bloco como livre
-  strcpy(disk[blockIndex].type, "F");
-  memset(&disk[blockIndex].directory, 0, sizeof(Directory)); // Limpa os dados do diretório
+  // Remove o inode do diretório
+  strcpy(disk[inodeIndex].type, "F");
+  memset(&disk[inodeIndex].principalInode, 0, sizeof(PrincipalInode));
 
-  // Remove o diretório do diretório pai
+  // Atualiza o diretório pai
   for (int i = directoryIndex; i < disk[dirIndex].directory.TL - 1; i++)
   {
     disk[dirIndex].directory.index[i] = disk[dirIndex].directory.index[i + 1];
     strcpy(disk[dirIndex].directory.name[i], disk[dirIndex].directory.name[i + 1]);
   }
   disk[dirIndex].directory.TL--;
-
-  pushToStack(blockIndex); // Devolve o bloco para a pilha de blocos livres
 }
 
 void Bad(Block disk[], int blockIndex)
@@ -438,14 +460,13 @@ void Bad(Block disk[], int blockIndex)
 
 void chmod(Block disk[], char *fileName, char *command)
 {
-  int directoryIndex = currentDirectoryIndex; // Usa o diretório atual.
+  int directoryIndex = currentDirectoryIndex;
   if (directoryIndex == -1)
   {
     printf("Diretório não encontrado.\n");
     return;
   }
 
-  // Encontra o arquivo no diretório atual
   int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
   if (fileIndex == -1)
   {
@@ -460,60 +481,42 @@ void chmod(Block disk[], char *fileName, char *command)
     return;
   }
 
-  // Interpretando o comando de permissão
   char command_type;
-  char who[4];
+  char who;
   char permissions[4];
-  if (sscanf(command, "%c%s%s", &command_type, who, permissions) != 3)
+  if (sscanf(command, "%c%c%s", &who, &command_type, permissions) != 3)
   {
     printf("Comando de permissão inválido.\n");
     return;
   }
 
-  // Determina qual permissão será alterada (R, W, ou X)
-  char perm;
-  switch (permissions[0])
-  {
-  case 'R':
-    perm = 'r';
-    break;
-  case 'W':
-    perm = 'w';
-    break;
-  case 'X':
-    perm = 'x';
-    break;
-  default:
-    printf("Permissão inválida.\n");
-    return;
-  }
+  PrincipalInode inode = disk[blockIndex].principalInode;
+  int perm_base = (who == 'u' ? 0 : who == 'g' ? 3
+                                               : 6);
 
-  // Determina o índice inicial no array de permissões
-  int start_index;
-  switch (who[0])
+  for (int i = 0; i < strlen(permissions); i++)
   {
-  case 'u':
-    start_index = 0;
-    break;
-  case 'g':
-    start_index = 3;
-    break;
-  case 'o':
-    start_index = 6;
-    break;
-  default:
-    printf("Usuário inválido.\n");
-    return;
-  }
-
-  // Atualiza as permissões do arquivo de acordo com o comando
-  for (int i = 0; i < (int)strlen(permissions); i++)
-  {
+    int perm_index = perm_base + (permissions[i] == 'r' ? 0 : permissions[i] == 'w' ? 1
+                                                                                    : 2);
     if (command_type == '+')
-      disk[blockIndex].principalInode.permissions[start_index + i] = perm;
+    {
+      // Só adiciona se ainda não tem a permissão
+      if (inode.permissions[perm_index] != permissions[i])
+      {
+        inode.permissions[perm_index] = permissions[i];
+      }
+    }
     else if (command_type == '-')
-      disk[blockIndex].principalInode.permissions[start_index + i] = '-';
+    {
+      // Só remove se a permissão existir
+      if (inode.permissions[perm_index] != '-')
+      {
+        inode.permissions[perm_index] = '-';
+      }
+    }
   }
+
+  disk[blockIndex].principalInode = inode;
   printf("Permissões do arquivo %s alteradas com sucesso.\n", fileName);
 }
 
@@ -525,7 +528,7 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
     return;
   }
 
-  int numBlocks = (fileSizeInBytes + blockSize - 1) / blockSize; // Arrendondamento para cima
+  int numBlocks = (fileSizeInBytes + blockSize - 1) / blockSize;
   int directoryIndex = currentDirectoryIndex;
   if (directoryIndex == -1)
   {
@@ -539,7 +542,6 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
     return;
   }
 
-  // Encontrar um bloco livre para o inode
   int inodeIndex = getRandomFreeBlock();
   if (inodeIndex == -1)
   {
@@ -547,21 +549,19 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
     return;
   }
 
-  // Inicializando o inode principal
-  strcpy(disk[inodeIndex].type, "I"); // Definindo como inode
-  PrincipalInode *inode = &disk[inodeIndex].principalInode;
-  strcpy(inode->name, fileName);
-  inode->size = fileSizeInBytes;
-  inode->countLinks = 1;
-  chmod(disk, fileName, "u+rwx");
-  strcpy(inode->userName, "user");
-  strcpy(inode->groupName, "group");
-  inode->indirect = -1;
+  strcpy(disk[inodeIndex].type, "I");
+  PrincipalInode inode = disk[inodeIndex].principalInode;
+  strcpy(inode.name, fileName);
+  inode.size = fileSizeInBytes;
+  inode.countLinks = 1;
+  strcpy(inode.permissions, "rw-r--r--"); // Default permissions
+  strcpy(inode.userName, "user");
+  strcpy(inode.groupName, "group");
+  inode.indirect = -1;
 
   time_t now = time(0);
-  inode->date = localtime(&now);
+  inode.date = localtime(&now);
 
-  // Alocando blocos diretos se necessário
   int allocatedBlocks = 0;
   for (int i = 0; i < numBlocks && i < MAX_DIRECT_POINTERS; i++)
   {
@@ -571,12 +571,11 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
       printf("Espaço insuficiente para alocar blocos diretos.\n");
       return;
     }
-    inode->pointer[i] = blockIndex;
-    strcpy(disk[blockIndex].type, "D"); // Definindo como bloco de dados
+    inode.pointer[i] = blockIndex;
+    strcpy(disk[blockIndex].type, "D");
     allocatedBlocks++;
   }
 
-  // Alocando blocos indiretos se necessário
   if (numBlocks > MAX_DIRECT_POINTERS)
   {
     int indirectIndex = getRandomFreeBlock();
@@ -586,7 +585,7 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
       return;
     }
     initializeIndirectInode(disk, indirectIndex);
-    inode->indirect = indirectIndex;
+    inode.indirect = indirectIndex;
 
     for (int i = 0; i < numBlocks - MAX_DIRECT_POINTERS && i < MAX_INDIRECT_POINTERS; i++)
     {
@@ -594,17 +593,16 @@ void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
       if (blockIndex == -1)
       {
         printf("Espaço insuficiente para alocar blocos indiretos.\n");
-
         return;
       }
       disk[indirectIndex].indirectInode.pointer[i] = blockIndex;
-      strcpy(disk[blockIndex].type, "D"); // Definição como bloco de dados
+      strcpy(disk[blockIndex].type, "D");
       allocatedBlocks++;
     }
   }
 
   disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, fileName, inodeIndex);
-  printf("Arquivo '%s' criado com sucesso com %d blocos.\n", fileName, allocatedBlocks);
+  disk[inodeIndex].principalInode = inode; // Update inode back to disk array after modifications
 }
 
 int main()
@@ -642,7 +640,8 @@ int main()
       printf("Saindo...\n");
       break;
     }
-    else if (strcmp(command, "ls -l") == 0){
+    else if (strcmp(command, "ls -l") == 0)
+    {
       ls_l(disk);
     }
     else if (strcmp(command, "ls") == 0)
@@ -659,11 +658,11 @@ int main()
     }
     else if (sscanf(command, "mkdir %s", arg1) == 1)
     {
-      mkdir(disk, currentDirectoryIndex, arg1);
+      mkdir(disk, currentDirectoryIndex, arg1, blockSize);
     }
     else if (sscanf(command, "mkdir %s %s", arg1, arg2) == 2)
     {
-      mkdirFromPath(disk, arg1, arg2);
+      mkdirFromPath(disk, arg1, arg2, blockSize);
     }
     else if (sscanf(command, "cd %s", arg1) == 1)
     {
