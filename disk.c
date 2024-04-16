@@ -504,7 +504,7 @@ void chmod(Block disk[], char *fileName, char *command)
   int perm_base = (who == 'u' ? 0 : who == 'g' ? 3
                                                : 6);
 
-  for (int i = 0; i < strlen(permissions); i++)
+  for (int i = 0; i < (int) strlen(permissions); i++)
   {
     int perm_index = perm_base + (permissions[i] == 'r' ? 0 : permissions[i] == 'w' ? 1
                                                                                     : 2);
