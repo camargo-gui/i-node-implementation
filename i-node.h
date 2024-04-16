@@ -11,8 +11,7 @@ typedef struct indirectInode IndirectInode;
 struct principalInode
 {
   char permissions[10]; // 1 - d ou l, 2 - u[RWX], 3 - g[RWX], 4... - o[RWX]
-  char date[10];
-  char hour[10];
+  struct tm *date;
   char userName[10];
   char groupName[10];
   int size;

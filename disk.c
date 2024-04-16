@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
 #include "i-node.h"
 #include "directory.h"
 #include "stack.h"
@@ -154,93 +155,6 @@ int findFileInDirectory(Directory directory, char *fileName)
   return -1;
 }
 
-void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
-{
-  if (fileSizeInBytes <= 0)
-  {
-    printf("Tamanho do arquivo inválido.\n");
-    return;
-  }
-
-  int numBlocks = (fileSizeInBytes + blockSize - 1) / blockSize; // Arrendondamento para cima
-  int directoryIndex = currentDirectoryIndex;
-  if (directoryIndex == -1)
-  {
-    printf("Diretório não encontrado.\n");
-    return;
-  }
-
-  if (findFileInDirectory(disk[directoryIndex].directory, fileName) != -1)
-  {
-    printf("Arquivo já existe.\n");
-    return;
-  }
-
-  // Encontrar um bloco livre para o inode
-  int inodeIndex = getRandomFreeBlock();
-  if (inodeIndex == -1)
-  {
-    printf("Não há espaço para um novo inode.\n");
-    return;
-  }
-
-  // Inicializando o inode principal
-  strcpy(disk[inodeIndex].type, "I"); // Definindo como inode
-  PrincipalInode *inode = &disk[inodeIndex].principalInode;
-  strcpy(inode->name, fileName);
-  inode->size = fileSizeInBytes;
-  inode->countLinks = 1;
-  strcpy(inode->permissions, "rw-r--r--");
-  strcpy(inode->userName, "user");
-  strcpy(inode->groupName, "group");
-  inode->indirect = -1;
-
-  // Alocando blocos diretos se necessário
-  int allocatedBlocks = 0;
-  for (int i = 0; i < numBlocks && i < MAX_DIRECT_POINTERS; i++)
-  {
-    int blockIndex = getRandomFreeBlock();
-    if (blockIndex == -1)
-    {
-      printf("Espaço insuficiente para alocar blocos diretos.\n");
-      return;
-    }
-    inode->pointer[i] = blockIndex;
-    strcpy(disk[blockIndex].type, "D"); // Definindo como bloco de dados
-    allocatedBlocks++;
-  }
-
-  // Alocando blocos indiretos se necessário
-  if (numBlocks > MAX_DIRECT_POINTERS)
-  {
-    int indirectIndex = getRandomFreeBlock();
-    if (indirectIndex == -1)
-    {
-      printf("Espaço insuficiente para inode indireto.\n");
-      return;
-    }
-    initializeIndirectInode(disk, indirectIndex);
-    inode->indirect = indirectIndex;
-
-    for (int i = 0; i < numBlocks - MAX_DIRECT_POINTERS && i < MAX_INDIRECT_POINTERS; i++)
-    {
-      int blockIndex = getRandomFreeBlock();
-      if (blockIndex == -1)
-      {
-        printf("Espaço insuficiente para alocar blocos indiretos.\n");
-
-        return;
-      }
-      disk[indirectIndex].indirectInode.pointer[i] = blockIndex;
-      strcpy(disk[blockIndex].type, "D"); // Definição como bloco de dados
-      allocatedBlocks++;
-    }
-  }
-
-  disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, fileName, inodeIndex);
-  printf("Arquivo '%s' criado com sucesso com %d blocos.\n", fileName, allocatedBlocks);
-}
-
 void ls(Block disk[])
 {
   int directoryIndex = currentDirectoryIndex;
@@ -255,6 +169,31 @@ void ls(Block disk[])
     printf("%s\n", disk[directoryIndex].directory.name[i]);
   }
 }
+
+void ls_l(Block disk[])
+{
+  int directoryIndex = currentDirectoryIndex;
+  if (directoryIndex == -1)
+  {
+    printf("Diretório não encontrado.\n");
+    return;
+  }
+
+  for (int i = 0; i < disk[directoryIndex].directory.TL; i++)
+  {
+    int fileIndex = disk[directoryIndex].directory.index[i];
+    if (strcmp(disk[fileIndex].type, "I") == 0)
+    {
+      PrincipalInode *inode = &disk[fileIndex].principalInode;
+      printf("%s -> %s | %d links | user:  %s | group: %s | size: %db | tipo: %s | criado em: %02d/%02d", inode->name, inode->permissions, inode->countLinks, inode->userName, inode->groupName, inode->size, disk[fileIndex].type, inode->date -> tm_mday, inode->date -> tm_mon);
+    }
+    else if (strcmp(disk[fileIndex].type, "DIR") == 0)
+    {
+      printf("%s -> drwxr-xr-x 2 user group 0 %s\n", disk[directoryIndex].directory.name[i], disk[fileIndex].type); //Deveria ser um inode para guardar as infos
+    }
+  }
+}
+
 
 void mkdir(Block disk[], int parentDirIndex, char *dirName)
 {
@@ -409,6 +348,11 @@ void deleteFile(Block disk[], char *fileName)
 
   // Obtém o inode do arquivo
   PrincipalInode *inode = &disk[inodeIndex].principalInode;
+
+  if(inode->permissions[0] != 'r'){
+    printf("Permissão negada.\n");
+    return;
+  }
 
   // Libera blocos diretos
   for (int i = 0; i < MAX_DIRECT_POINTERS && inode->pointer[i] != -1; i++)
@@ -573,6 +517,96 @@ void chmod(Block disk[], char *fileName, char *command)
   printf("Permissões do arquivo %s alteradas com sucesso.\n", fileName);
 }
 
+void touch(Block disk[], char *fileName, int fileSizeInBytes, int blockSize)
+{
+  if (fileSizeInBytes <= 0)
+  {
+    printf("Tamanho do arquivo inválido.\n");
+    return;
+  }
+
+  int numBlocks = (fileSizeInBytes + blockSize - 1) / blockSize; // Arrendondamento para cima
+  int directoryIndex = currentDirectoryIndex;
+  if (directoryIndex == -1)
+  {
+    printf("Diretório não encontrado.\n");
+    return;
+  }
+
+  if (findFileInDirectory(disk[directoryIndex].directory, fileName) != -1)
+  {
+    printf("Arquivo já existe.\n");
+    return;
+  }
+
+  // Encontrar um bloco livre para o inode
+  int inodeIndex = getRandomFreeBlock();
+  if (inodeIndex == -1)
+  {
+    printf("Não há espaço para um novo inode.\n");
+    return;
+  }
+
+  // Inicializando o inode principal
+  strcpy(disk[inodeIndex].type, "I"); // Definindo como inode
+  PrincipalInode *inode = &disk[inodeIndex].principalInode;
+  strcpy(inode->name, fileName);
+  inode->size = fileSizeInBytes;
+  inode->countLinks = 1;
+  chmod(disk, fileName, "u+rwx");
+  strcpy(inode->userName, "user");
+  strcpy(inode->groupName, "group");
+  inode->indirect = -1;
+
+  time_t now = time(0);
+  inode->date = localtime(&now);
+
+  // Alocando blocos diretos se necessário
+  int allocatedBlocks = 0;
+  for (int i = 0; i < numBlocks && i < MAX_DIRECT_POINTERS; i++)
+  {
+    int blockIndex = getRandomFreeBlock();
+    if (blockIndex == -1)
+    {
+      printf("Espaço insuficiente para alocar blocos diretos.\n");
+      return;
+    }
+    inode->pointer[i] = blockIndex;
+    strcpy(disk[blockIndex].type, "D"); // Definindo como bloco de dados
+    allocatedBlocks++;
+  }
+
+  // Alocando blocos indiretos se necessário
+  if (numBlocks > MAX_DIRECT_POINTERS)
+  {
+    int indirectIndex = getRandomFreeBlock();
+    if (indirectIndex == -1)
+    {
+      printf("Espaço insuficiente para inode indireto.\n");
+      return;
+    }
+    initializeIndirectInode(disk, indirectIndex);
+    inode->indirect = indirectIndex;
+
+    for (int i = 0; i < numBlocks - MAX_DIRECT_POINTERS && i < MAX_INDIRECT_POINTERS; i++)
+    {
+      int blockIndex = getRandomFreeBlock();
+      if (blockIndex == -1)
+      {
+        printf("Espaço insuficiente para alocar blocos indiretos.\n");
+
+        return;
+      }
+      disk[indirectIndex].indirectInode.pointer[i] = blockIndex;
+      strcpy(disk[blockIndex].type, "D"); // Definição como bloco de dados
+      allocatedBlocks++;
+    }
+  }
+
+  disk[directoryIndex].directory = insertNewEntry(disk[directoryIndex].directory, fileName, inodeIndex);
+  printf("Arquivo '%s' criado com sucesso com %d blocos.\n", fileName, allocatedBlocks);
+}
+
 int main()
 {
   int blockSize;
@@ -607,6 +641,9 @@ int main()
     {
       printf("Saindo...\n");
       break;
+    }
+    else if (strcmp(command, "ls -l") == 0){
+      ls_l(disk);
     }
     else if (strcmp(command, "ls") == 0)
     {
