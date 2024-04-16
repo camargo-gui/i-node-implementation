@@ -13,6 +13,11 @@
 int currentDirectoryIndex = 100;
 char currentPath[1024] = "/";
 
+void printPrompt()
+{
+  printf("\033[0;32muser@group:\033[0m\033[0;34m%s\033[0m $ ", currentPath);
+}
+
 void initializeDisk(Block disk[])
 {
   for (int i = 0; i < 1000; i++)
@@ -242,12 +247,10 @@ void mkdir(Block disk[], int parentDirIndex, char *dirName, int blockSize)
 
   // Configura o bloco de diretório
   strcpy(disk[dirBlockIndex].type, "DIR");
-  disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, ".", dirInodeIndex);  
+  disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, ".", dirInodeIndex);
   disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, "..", parentDirIndex);
   disk[parentDirIndex].directory = insertNewEntry(disk[parentDirIndex].directory, dirName, dirInodeIndex);
   dirInode->pointer[0] = dirBlockIndex; // O primeiro bloco de diretório é apontado pelo inode
-
-  printf("Diretório '%s' criado com sucesso.\n", dirName);
 }
 
 void mkdirFromPath(Block disk[], char *path, char *dirName, int blockSize)
@@ -320,7 +323,7 @@ void cd(Block disk[], char *dirName)
   int dirIndex = findFileInDirectory(disk[currentDirectoryIndex].directory, dirName);
   if (dirIndex == -1)
   {
-    printf("Diretório não encontrado.\n");
+    printf("cd %s: No such file or directory\n", dirName);
     return;
   }
 
@@ -350,16 +353,23 @@ void clearScreen()
 void deleteFile(Block disk[], char *fileName)
 {
   int dirIndex = currentDirectoryIndex; // Usa o diretório atual.
+  int naoEncontrado = 0;
   if (dirIndex == -1)
   {
-    printf("Diretório não encontrado.\n");
+    naoEncontrado = 1;
     return;
   }
 
   int fileIndex = findFileInDirectory(disk[dirIndex].directory, fileName);
   if (fileIndex == -1)
   {
-    printf("Arquivo não encontrado.\n");
+    naoEncontrado = 1;
+    return;
+  }
+
+  if (naoEncontrado)
+  {
+    printf("rm %s: No such file or directory\n", fileName);
     return;
   }
 
@@ -463,14 +473,14 @@ void chmod(Block disk[], char *fileName, char *command)
   int directoryIndex = currentDirectoryIndex;
   if (directoryIndex == -1)
   {
-    printf("Diretório não encontrado.\n");
+    printf("chmod %s %s: No such file or directory\n", fileName, command);
     return;
   }
 
   int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
   if (fileIndex == -1)
   {
-    printf("Arquivo não encontrado.\n");
+    printf("chmod %s %s: No such file or directory\n", fileName, command);
     return;
   }
 
@@ -630,7 +640,7 @@ int main()
 
   while (1)
   {
-    printf("\n%s\n > ", currentPath);
+    printPrompt();
     fgets(command, 256, stdin);
 
     command[strcspn(command, "\n")] = 0;
@@ -703,7 +713,7 @@ int main()
 
     else
     {
-      printf("Comando não reconhecido.\n");
+      printf("%s: command not found\n", command);
     }
   }
 
