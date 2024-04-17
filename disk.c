@@ -208,7 +208,7 @@ void ls_l(Block disk[])
     {
       printf("%s %d %s %s %d %d/%d %d:%d %s\n",
              inode.permissions, inode.countLinks, inode.userName, inode.groupName,
-             inode.size, inode.date->tm_mday, inode.date->tm_mon + 1, inode.date -> tm_hour, inode.date -> tm_min,inode.name);
+             inode.size, inode.date->tm_mday, inode.date->tm_mon + 1, inode.date->tm_hour, inode.date->tm_min, inode.name);
     }
     else
     {
@@ -242,17 +242,16 @@ void mkdir(Block disk[], int parentDirIndex, char *dirName, int blockSize)
 
   // Configura o inode do diretório
   strcpy(disk[dirInodeIndex].type, "I");
-  PrincipalInode *dirInode = &disk[dirInodeIndex].principalInode;
-  strcpy(dirInode->name, dirName);
-  dirInode->size = blockSize;
-  dirInode->countLinks = 1;
-  strcpy(dirInode->permissions, "rwxr-xr-x");
-  strcpy(dirInode->userName, "user");
-  strcpy(dirInode->groupName, "group");
-  dirInode->indirect = -1; // Não há blocos indiretos inicialmente
+  strcpy(disk[dirInodeIndex].principalInode.name, dirName);
+  disk[dirInodeIndex].principalInode.size = blockSize;
+  disk[dirInodeIndex].principalInode.countLinks = 1;
+  strcpy(disk[dirInodeIndex].principalInode.permissions, "rwxr-xr-x");
+  strcpy(disk[dirInodeIndex].principalInode.userName, "user");
+  strcpy(disk[dirInodeIndex].principalInode.groupName, "group");
+  disk[dirInodeIndex].principalInode.indirect = -1;
 
-  time_t now = time(NULL);          // Pega a hora e data atual
-  dirInode->date = localtime(&now); // Armazena a data e hora no inode
+  time_t now = time(NULL);
+  disk[dirInodeIndex].principalInode.date = localtime(&now); // A data é copiada para a estrutura
 
   int dirBlockIndex = getRandomFreeBlock(); // Bloco para as entradas de diretório
   if (dirBlockIndex == -1)
@@ -266,7 +265,7 @@ void mkdir(Block disk[], int parentDirIndex, char *dirName, int blockSize)
   disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, ".", dirInodeIndex);
   disk[dirBlockIndex].directory = insertNewEntry(disk[dirBlockIndex].directory, "..", parentDirIndex);
   disk[parentDirIndex].directory = insertNewEntry(disk[parentDirIndex].directory, dirName, dirInodeIndex);
-  dirInode->pointer[0] = dirBlockIndex; // O primeiro bloco de diretório é apontado pelo inode
+  disk[parentDirIndex].principalInode.pointer[0] = dirBlockIndex; // O primeiro bloco de diretório é apontado pelo inode
 }
 
 void mkdirFromPath(Block disk[], char *path, char *dirName, int blockSize)
@@ -427,42 +426,47 @@ void deleteFile(Block disk[], char *fileName)
     return;
   }
 
-  if(disk[inodeIndex].principalInode.permissions[1] != 'w'){
-    printf("permission denied.\n");
+  if (disk[inodeIndex].principalInode.permissions[1] != 'w')
+  {
+    printf("Permissão negada.\n");
     return;
   }
 
   // Decrementa o contador de links
-  if (--disk[inodeIndex].principalInode.countLinks == 0)
+  disk[inodeIndex].principalInode.countLinks--;
+  if (disk[inodeIndex].principalInode.countLinks <= 0)
   {
-    // Libera blocos diretos se não houver mais links
-    for (int i = 0; i < MAX_DIRECT_POINTERS && disk[inodeIndex].principalInode.pointer[i] != -1; i++)
+    // Libera blocos diretos
+    for (int i = 0; i < MAX_DIRECT_POINTERS; i++)
     {
-      disk[disk[inodeIndex].principalInode.pointer[i]].type[0] = 'F'; // Marca o bloco como livre
-      disk[disk[inodeIndex].principalInode.pointer[i]].type[1] = '\0';
-      pushToStack(disk[inodeIndex].principalInode.pointer[i]);
+      if (disk[inodeIndex].principalInode.pointer[i] != -1)
+      {
+        disk[disk[inodeIndex].principalInode.pointer[i]].type[0] = 'F'; // Marca o bloco como livre
+        disk[disk[inodeIndex].principalInode.pointer[i]].type[1] = '\0';
+      }
     }
 
-    // Libera blocos indiretos, se houver
+    // Libera blocos indiretos
     if (disk[inodeIndex].principalInode.indirect != -1)
     {
-      IndirectInode *indirect = &disk[disk[inodeIndex].principalInode.indirect].indirectInode;
-      for (int i = 0; i < MAX_INDIRECT_POINTERS && indirect->pointer[i] != -1; i++)
+      for (int i = 0; i < MAX_INDIRECT_POINTERS; i++)
       {
-        disk[indirect->pointer[i]].type[0] = 'F';
-        disk[indirect->pointer[i]].type[1] = '\0';
-        pushToStack(indirect->pointer[i]);
+        if (disk[disk[inodeIndex].principalInode.indirect].indirectInode.pointer[i] != -1)
+        {
+          disk[disk[disk[inodeIndex].principalInode.indirect].indirectInode.pointer[i]].type[0] = 'F';
+          disk[disk[disk[inodeIndex].principalInode.indirect].indirectInode.pointer[i]].type[1] = '\0';
+        }
       }
-      disk[disk[inodeIndex].principalInode.indirect].type[0] = 'F';
+      disk[disk[inodeIndex].principalInode.indirect].type[0] = 'F'; // Marca o bloco de inode indireto como livre
       disk[disk[inodeIndex].principalInode.indirect].type[1] = '\0';
-      pushToStack(disk[inodeIndex].principalInode.indirect);
     }
 
-    // Limpa o inode principal completamente se não houver mais links
-    clearInode(disk, inodeIndex);
+    // Limpa o inode principal
+    disk[inodeIndex].type[0] = 'F'; // Marca o inode como livre
+    disk[inodeIndex].type[1] = '\0';
   }
 
-  // Remove a entrada do diretório sempre
+  // Remove a entrada do diretório
   removeEntryFromDirectory(disk, dirIndex, fileIndex);
   // printf("Arquivo '%s' removido com sucesso.\n", fileName);
 }
@@ -485,7 +489,8 @@ void deleteDirectory(Block disk[], char *dirName)
     return;
   }
 
-  if(disk[inodeIndex].principalInode.permissions[1] != 'w'){
+  if (disk[inodeIndex].principalInode.permissions[1] != 'w')
+  {
     printf("permission denied.\n");
     return;
   }
@@ -672,7 +677,8 @@ void linkFile(Block disk[], char *sourceFileName, char *destFileName, char type)
   }
 
   int sourceInodeIndex = disk[directoryIndex].directory.index[sourceFileIndex];
-  if(disk[sourceInodeIndex].principalInode.permissions[0] != 'r'){
+  if (disk[sourceInodeIndex].principalInode.permissions[0] != 'r')
+  {
     printf("permission denied.\n");
     return;
   }
@@ -729,7 +735,8 @@ void unlinkFile(Block disk[], char *fileName, char type)
 
   int inodeIndex = disk[directoryIndex].directory.index[fileIndex];
 
-  if(disk[inodeIndex].principalInode.permissions[0] != 'r'){
+  if (disk[inodeIndex].principalInode.permissions[0] != 'r')
+  {
     printf("permission denied.\n");
     return;
   }
@@ -754,49 +761,93 @@ void unlinkFile(Block disk[], char *fileName, char type)
 
 void checkFileCorruption(Block disk[], char *fileName)
 {
-    int directoryIndex = currentDirectoryIndex;
-    if (directoryIndex == -1)
+  int directoryIndex = currentDirectoryIndex;
+  if (directoryIndex == -1)
+  {
+    printf("no such file or directory\n");
+    return;
+  }
+
+  int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
+  if (fileIndex == -1)
+  {
+    printf("no such file or directory.\n");
+    return;
+  }
+
+  int inodeIndex = disk[directoryIndex].directory.index[fileIndex];
+
+  // Verifica se algum bloco associado ao arquivo está marcado como "bad"
+  PrincipalInode inode = disk[inodeIndex].principalInode;
+  for (int i = 0; i < MAX_DIRECT_POINTERS; i++)
+  {
+    if (inode.pointer[i] != -1 && strcmp(disk[inode.pointer[i]].type, "B") == 0)
     {
-        printf("no such file or directory\n");
+      printf("Arquivo corrompido.\n");
+      return;
+    }
+  }
+
+  if (inode.indirect != -1)
+  {
+    IndirectInode indirect = disk[inode.indirect].indirectInode;
+    for (int i = 0; i < MAX_INDIRECT_POINTERS; i++)
+    {
+      if (indirect.pointer[i] != -1 && strcmp(disk[indirect.pointer[i]].type, "B") == 0)
+      {
+        printf("Arquivo corrompido.\n");
         return;
+      }
     }
+  }
 
-    int fileIndex = findFileInDirectory(disk[directoryIndex].directory, fileName);
-    if (fileIndex == -1)
-    {
-        printf("no such file or directory.\n");
-        return;
-    }
-
-    int inodeIndex = disk[directoryIndex].directory.index[fileIndex];
-
-    // Verifica se algum bloco associado ao arquivo está marcado como "bad"
-    PrincipalInode inode = disk[inodeIndex].principalInode;
-    for (int i = 0; i < MAX_DIRECT_POINTERS; i++)
-    {
-        if (inode.pointer[i] != -1 && strcmp(disk[inode.pointer[i]].type, "B") == 0)
-        {
-            printf("Arquivo corrompido.\n");
-            return;
-        }
-    }
-
-    if (inode.indirect != -1)
-    {
-        IndirectInode indirect = disk[inode.indirect].indirectInode;
-        for (int i = 0; i < MAX_INDIRECT_POINTERS; i++)
-        {
-            if (indirect.pointer[i] != -1 && strcmp(disk[indirect.pointer[i]].type, "B") == 0)
-            {
-                printf("Arquivo corrompido.\n");
-                return;
-            }
-        }
-    }
-
-    printf("Arquivo aberto.\n");
+  printf("Arquivo aberto.\n");
 }
 
+void printDiskBlocks(Block disk[])
+{
+  const char *RED = "\x1b[31m";
+  const char *GREEN = "\x1b[32m";
+  const char *YELLOW = "\x1b[33m";
+  const char *BLUE = "\x1b[34m";
+  const char *MAGENTA = "\x1b[35m";
+  const char *CYAN = "\x1b[36m";
+  const char *RESET = "\x1b[0m";
+
+  printf("\n");
+  for (int i = 0; i < NUM_BLOCOS; i++)
+  {
+    if (strcmp(disk[i].type, "F") == 0)
+    {
+      printf("%s", GREEN);
+    }
+    else if (strcmp(disk[i].type, "B") == 0)
+    {
+      printf("%s", RED);
+    }
+    else if (strcmp(disk[i].type, "I") == 0)
+    {
+      printf("%s", YELLOW);
+    }
+    else if (strcmp(disk[i].type, "D") == 0)
+    {
+      printf("%s", BLUE);
+    }
+    else if (strcmp(disk[i].type, "DIR") == 0)
+    {
+      printf("%s", MAGENTA);
+    }
+    else
+    {
+      printf("%s", CYAN);
+    }
+
+    printf(" [%-3s] %s", disk[i].type, RESET);
+    if ((i + 1) % 10 == 0)
+      printf("\n");
+  }
+  printf("\n");
+}
 
 int main()
 {
@@ -911,7 +962,11 @@ int main()
     }
     else if (strcmp(command, "help") == 0)
     {
-      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission>, link -h <file> <linkname>, link -s <file> <linkname>, unlink -h <linkname>, unlink -h <linkname>, vi <filename>, clear\n");
+      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission>, link -h <file> <linkname>, link -s <file> <linkname>, unlink -h <linkname>, unlink -h <linkname>, vi <filename>, print disk, clear\n");
+    }
+    else if (strcmp(command, "print disk") == 0)
+    {
+      printDiskBlocks(disk);
     }
     else
     {
