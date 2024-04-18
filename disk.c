@@ -849,6 +849,105 @@ void printDiskBlocks(Block disk[])
   printf("\n");
 }
 
+void countFileBlocks(Block disk[], char *fileName)
+{
+    int dirIndex = currentDirectoryIndex;
+    if (dirIndex == -1)
+    {
+        printf("Diretório não encontrado.\n");
+        return;
+    }
+
+    int fileIndex = findFileInDirectory(disk[dirIndex].directory, fileName);
+    if (fileIndex == -1)
+    {
+        printf("%s: No such file or directory\n", fileName);
+        return;
+    }
+
+    int inodeIndex = disk[dirIndex].directory.index[fileIndex];
+    if (strcmp(disk[inodeIndex].type, "I") != 0)
+    {
+        printf("%s não é um arquivo.\n", fileName);
+        return;
+    }
+
+    PrincipalInode inode = disk[inodeIndex].principalInode;
+    int blockCount = 0;
+
+    for (int i = 0; i < MAX_DIRECT_POINTERS; i++)
+    {
+        if (inode.pointer[i] != -1)
+            blockCount++;
+    }
+
+    if (inode.indirect != -1)
+    {
+        IndirectInode indirectInode = disk[inode.indirect].indirectInode;
+        for (int i = 0; i < MAX_INDIRECT_POINTERS; i++)
+        {
+            if (indirectInode.pointer[i] != -1)
+                blockCount++;
+        }
+    }
+
+    printf("Número de blocos ocupados pelo arquivo '%s': %d\n", fileName, blockCount);
+}
+void checkAllFilesIntegrity(Block disk[]) {
+    printf("Verificação de integridade de todos os arquivos:\n");
+    int foundFiles = 0;  
+
+    for (int i = 0; i < NUM_BLOCOS; i++) {
+        if (strcmp(disk[i].type, "DIR") == 0) { 
+            Directory dir = disk[i].directory;
+            printf("Diretório encontrado no bloco %d\n", i);
+
+            for (int j = 0; j < dir.TL; j++) {
+                // Pular as entradas "." e ".."
+                if (strcmp(dir.name[j], ".") != 0 && strcmp(dir.name[j], "..") != 0) {
+                    int inodeIndex = dir.index[j];
+                    if (strcmp(disk[inodeIndex].type, "I") == 0) {  
+                        foundFiles = 1; 
+                        printf("Analisando arquivo '%s' no inode %d\n", dir.name[j], inodeIndex);
+                        int isCorrupted = 0;  
+                        PrincipalInode inode = disk[inodeIndex].principalInode;
+
+                        for (int k = 0; k < MAX_DIRECT_POINTERS; k++) {
+                            if (inode.pointer[k] != -1 && strcmp(disk[inode.pointer[k]].type, "B") == 0) {
+                                isCorrupted = 1;  // Marca como corrompido
+                                printf("Bloco defeituoso encontrado no bloco direto %d\n", inode.pointer[k]);
+                                break;
+                            }
+                        }
+
+                        if (!isCorrupted && inode.indirect != -1) {
+                            IndirectInode indirect = disk[inode.indirect].indirectInode;
+                            for (int l = 0; l < MAX_INDIRECT_POINTERS; l++) {
+                                if (indirect.pointer[l] != -1 && strcmp(disk[indirect.pointer[l]].type, "B") == 0) {
+                                    isCorrupted = 1; 
+                                    printf("Bloco defeituoso encontrado no bloco indireto %d\n", indirect.pointer[l]);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (isCorrupted) {
+                            printf("Arquivo '%s' está corrompido por blocos defeituosos.\n", inode.name);
+                        } else {
+                            printf("Arquivo '%s' está íntegro.\n", inode.name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!foundFiles) {
+        printf("Nenhum arquivo encontrado para verificar.\n");
+    }
+}
+
+
 int main()
 {
   int blockSize;
@@ -962,11 +1061,39 @@ int main()
     }
     else if (strcmp(command, "help") == 0)
     {
-      printf("Comandos disponíveis: exit, ls, ls -l, touch <filename>, mkdir <directory>, cd <directory>, rm <filename>, rmdir <directory>, df, bad <block>, chmod <filename> <permission>, link -h <file> <linkname>, link -s <file> <linkname>, unlink -h <linkname>, unlink -h <linkname>, vi <filename>, print disk, clear\n");
+      printf("Comandos disponíveis:\n"
+       " exit,\n"
+       " ls,\n"
+       " ls -l,\n"
+       " touch <filename>,\n"
+       " mkdir <directory>,\n"
+       " cd <directory>,\n"
+       " rm <filename>,\n"
+       " rmdir <directory>,\n"
+       " df,\n"
+       " bad <block>,\n"
+       " chmod <filename> <permission>,\n"
+       " link -h <file> <linkname>,\n"
+       " link -s <file> <linkname>,\n"
+       " unlink -h <linkname>,\n"
+       " unlink -s <linkname>,\n"
+       " vi <filename>,\n"
+       " print disk,\n"
+       " count <filename>,\n"
+       " check all,\n"
+       " clear\n");
     }
     else if (strcmp(command, "print disk") == 0)
     {
       printDiskBlocks(disk);
+    }
+    else if(sscanf(command, "count %s", arg1) == 1)
+    {
+      countFileBlocks(disk, arg1);
+    }
+    else if (strcmp(command, "check all") == 0)
+    {
+      checkAllFilesIntegrity(disk);
     }
     else
     {
